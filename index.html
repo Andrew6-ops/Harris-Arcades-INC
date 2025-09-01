@@ -73,9 +73,9 @@
             box-sizing: border-box;
         }
         .control-btn {
-            background: rgba(0, 100, 0, 0.5); /* Opaque green for retro feel */
+            background: rgba(0, 100, 0, 0.5);
             border-radius: 8px;
-            color: #004d00; /* Dark green text */
+            color: #004d00;
             font-family: 'Press Start 2P', monospace;
             font-size: 12px;
             padding: 10px;
@@ -88,7 +88,7 @@
             align-items: center;
         }
         #joystick {
-            background: rgba(0, 100, 0, 0.5); /* Opaque green for retro feel */
+            background: rgba(0, 100, 0, 0.5);
             border-radius: 8px;
             width: 120px;
             height: 60px;
@@ -100,7 +100,7 @@
             position: absolute;
             width: 15px;
             height: 15px;
-            background: #004d00; /* Dark green knob */
+            background: #004d00;
             border-radius: 50%;
             left: 50%;
             top: 50%;
@@ -262,7 +262,6 @@
         }
 
         function playGameOver() {
-            // Primary explosion sound (sawtooth for harsh, explosive tone)
             const oscillator1 = audioCtx.createOscillator();
             const gain1 = audioCtx.createGain();
             oscillator1.type = 'sawtooth';
@@ -275,7 +274,6 @@
             oscillator1.start();
             oscillator1.stop(audioCtx.currentTime + 1.2);
 
-            // Secondary noise for chaotic rumble
             const noise = audioCtx.createBufferSource();
             const noiseGain = audioCtx.createGain();
             const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
@@ -301,12 +299,17 @@
         const INVADER_SPEED = 20;
         const UFO_SPEED = 100;
         const STAR_COUNT = 30;
-        const EXPLOSION_DURATION = 0.3; // Duration in seconds for explosion sprite
+        const EXPLOSION_DURATION = 0.3;
+        const BARRIER_COUNT = 4;
+        const BARRIER_WIDTH = 36;
+        const BARRIER_HEIGHT = 24;
+        const BARRIER_PIXEL_SIZE = 3;
 
         // Game state
         let player = { x: canvas.width / 2 - 16, y: canvas.height - 80, width: 24, height: 12 };
         let bullets = [];
         let invaders = [];
+        let barriers = [];
         let explosions = [];
         let ufo = null;
         let ufoSound = null;
@@ -399,11 +402,22 @@
             [1,0,0,0,0,0,1],
             [0,1,1,0,1,1,0]
         ];
+        const barrierSprite = [
+            [1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,0,0,0,0,1,1,1,1],
+            [1,1,1,0,0,0,0,0,0,1,1,1]
+        ];
 
         // Initialize game
         function init() {
             initStars();
             initInvaders();
+            initBarriers();
             document.addEventListener('keydown', handleInput);
             setupTouchControls();
             requestAnimationFrame(gameLoop);
@@ -437,6 +451,21 @@
                 }
             }
             invaderStepTime = 0.5 / (1 + level * 0.1);
+        }
+
+        function initBarriers() {
+            barriers = [];
+            const spacing = canvas.width / (BARRIER_COUNT + 1);
+            for (let i = 0; i < BARRIER_COUNT; i++) {
+                const pixels = barrierSprite.map(row => [...row]); // Deep copy of barrier sprite
+                barriers.push({
+                    x: spacing * (i + 1) - BARRIER_WIDTH / 2,
+                    y: canvas.height - 150,
+                    width: BARRIER_WIDTH,
+                    height: BARRIER_HEIGHT,
+                    pixels: pixels
+                });
+            }
         }
 
         function handleInput(e) {
@@ -519,6 +548,44 @@
             }
         }
 
+        function damageBarrier(barrier, bulletX, bulletY) {
+            const pixelW = barrier.width / barrier.pixels[0].length;
+            const pixelH = barrier.height / barrier.pixels.length;
+            const hitX = Math.floor((bulletX - barrier.x) / pixelW);
+            const hitY = Math.floor((bulletY - barrier.y) / pixelH);
+
+            // Damage a 3x3 area around the hit point
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const px = hitX + dx;
+                    const py = hitY + dy;
+                    if (px >= 0 && px < barrier.pixels[0].length && py >= 0 && py < barrier.pixels.length) {
+                        barrier.pixels[py][px] = 0;
+                    }
+                }
+            }
+        }
+
+        function checkBarrierCollision(barrier, bullet) {
+            const pixelW = barrier.width / barrier.pixels[0].length;
+            const pixelH = barrier.height / barrier.pixels.length;
+            const bulletCenterX = bullet.x + bullet.width / 2;
+            const bulletCenterY = bullet.y + (!bullet.player ? bullet.height : 0);
+            if (bulletCenterX >= barrier.x && bulletCenterX < barrier.x + barrier.width &&
+                bulletCenterY >= barrier.y && bulletCenterY < barrier.y + barrier.height) {
+                const pixelX = Math.floor((bulletCenterX - barrier.x) / pixelW);
+                const pixelY = Math.floor((bulletCenterY - barrier.y) / pixelH);
+                if (pixelX >= 0 && pixelX < barrier.pixels[0].length && pixelY >= 0 && pixelY < barrier.pixels.length) {
+                    if (barrier.pixels[pixelY][pixelX] === 1) {
+                        damageBarrier(barrier, bulletCenterX, bulletCenterY);
+                        return true; // Bullet hits intact pixel
+                    }
+                    return false; // Bullet passes through hole
+                }
+            }
+            return false;
+        }
+
         function update(deltaTime) {
             if (gameOver) return;
 
@@ -557,7 +624,7 @@
                 playInvaderMove();
                 lastStepTime = performance.now() / 1000;
 
-                if (maxY > canvas.height - 80) {
+                if (maxY > canvas.height - 150) {
                     gameOver = true;
                     playGameOver();
                 }
@@ -600,7 +667,16 @@
 
             // Collision detection
             bullets.forEach(bullet => {
-                if (bullet.player) {
+                let bulletHit = false;
+                // Check barrier collisions
+                for (let barrier of barriers) {
+                    if (checkBarrierCollision(barrier, bullet)) {
+                        bulletHit = true;
+                        bullet.y = bullet.player ? -10 : canvas.height + 10;
+                        break;
+                    }
+                }
+                if (!bulletHit && bullet.player) {
                     invaders.forEach(inv => {
                         if (inv.alive && bullet.x < inv.x + inv.width && bullet.x + bullet.width > inv.x &&
                             bullet.y < inv.y + inv.height && bullet.y + bullet.height > inv.y) {
@@ -613,15 +689,32 @@
                     });
                     if (ufo && bullet.x < ufo.x + ufo.width && bullet.x + bullet.width > ufo.x &&
                         bullet.y < ufo.y + ufo.height && bullet.y + bullet.height > ufo.y) {
+                        const ufoX = ufo.x;
+                        const ufoY = ufo.y;
+                        const ufoWidth = ufo.width;
+                        const ufoHeight = ufo.height;
                         ufo = null;
                         bullet.y = -10;
                         score += 100;
-                        explosions.push({ x: ufo.x, y: ufo.y, width: ufo.width, height: ufo.height, time: 0, color: '#f00' });
+                        explosions.push({ x: ufoX, y: ufoY, width: ufoWidth, height: ufoHeight, time: 0, color: '#f00' });
                         if (ufoSound) {
                             ufoSound.oscillator.stop();
                             ufoSound = null;
                         }
                         playUfoDestroyed();
+                    }
+                }
+                if (!bulletHit && !bullet.player) {
+                    if (bullet.x < player.x + player.width && bullet.x + bullet.width > player.x &&
+                        bullet.y < player.y + player.height && bullet.y + bullet.height > player.y) {
+                        lives--;
+                        bullet.y = canvas.height + 10;
+                        if (lives <= 0) {
+                            gameOver = true;
+                            playGameOver();
+                        } else {
+                            playPlayerExplosion();
+                        }
                     }
                 }
             });
@@ -630,6 +723,7 @@
             if (invaders.every(inv => !inv.alive)) {
                 level++;
                 initInvaders();
+                initBarriers();
             }
 
             // Enemy bullets
@@ -647,21 +741,6 @@
                     });
                 }
             }
-
-            // Check player hit
-            bullets.forEach(bullet => {
-                if (!bullet.player && bullet.x < player.x + player.width && bullet.x + bullet.width > player.x &&
-                    bullet.y < player.y + player.height && bullet.y + bullet.height > player.y) {
-                    lives--;
-                    bullet.y = canvas.height + 10;
-                    if (lives <= 0) {
-                        gameOver = true;
-                        playGameOver();
-                    } else {
-                        playPlayerExplosion();
-                    }
-                }
-            });
         }
 
         function drawSprite(ctx, sprite, x, y, width, height, color, isExplosion = false) {
@@ -677,6 +756,19 @@
                         } else {
                             ctx.fillRect(x + sx * pixelW, y + sy * pixelH, pixelW, pixelH);
                         }
+                    }
+                }
+            }
+        }
+
+        function drawBarrier(ctx, barrier) {
+            const pixelW = barrier.width / barrier.pixels[0].length;
+            const pixelH = barrier.height / barrier.pixels.length;
+            ctx.fillStyle = '#0f0';
+            for (let sy = 0; sy < barrier.pixels.length; sy++) {
+                for (let sx = 0; sx < barrier.pixels[0].length; sx++) {
+                    if (barrier.pixels[sy][sx]) {
+                        ctx.fillRect(barrier.x + sx * pixelW, barrier.y + sy * pixelH, pixelW, pixelH);
                     }
                 }
             }
@@ -702,6 +794,9 @@
             ctx.fillText(`Lives: ${lives}`, 10, 60);
             ctx.fillText(`Score: ${score}`, 10, 80);
             ctx.fillText(`Level: ${level}`, 10, 100);
+
+            // Draw barriers
+            barriers.forEach(barrier => drawBarrier(ctx, barrier));
 
             // Draw player
             drawSprite(ctx, playerSprite, player.x, player.y, player.width, player.height, '#ff0');
@@ -752,6 +847,7 @@
             gameOverText.style.display = 'none';
             joystickKnob.style.left = '50%';
             initInvaders();
+            initBarriers();
         }
 
         function gameLoop(timestamp) {
